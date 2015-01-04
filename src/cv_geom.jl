@@ -8,13 +8,12 @@ function hom(A)
   return cat(1, A, o)
 end
 
-function ihom(A)
-  if ndims(A) == 1
-    ret = A[1:end-1] / A[end]
-  else
-    ret = A[1:end-1,:] ./ A[end, :]
-  end
-  return ret
+function ihom{T<:Number}(A::Array{T, 1})
+  return A[1:end-1] / A[end]
+end
+
+function ihom{T<:Number}(A::Array{T, 2})
+  return A[1:end-1,:] ./ A[end, :]
 end
 
 end
