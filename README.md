@@ -1,3 +1,3 @@
-# cv_geom
+# CvGeom
 
-[![Build Status](https://travis-ci.org/nstiurca/cv_geom.jl.svg?branch=master)](https://travis-ci.org/nstiurca/cv_geom.jl)
+[![Build Status](https://travis-ci.org/nstiurca/CvGeom.jl.svg?branch=master)](https://travis-ci.org/nstiurca/CvGeom.jl)
