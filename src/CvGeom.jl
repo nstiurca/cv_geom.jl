@@ -127,7 +127,7 @@ type Match_1{T<:Number}
     idx2::Uint
     score::T
 end
-Match_1{T<:Number}(idx1, idx2, score::T) =
+Match_1{T<:Number}(idx1::Uint, idx2::Uint, score::T) =
   Match_1{T}(idx1, idx2, score)
 
 ########################################
@@ -135,43 +135,46 @@ Match_1{T<:Number}(idx1, idx2, score::T) =
 ########################################
 export countBits
 function countBits_naive{T<:Unsigned}(a::T)
-    sum::Uint = 0
+    sum = 0
     while(bool(a))
         sum += a&1
         a >>>= 1
     end
-    return uint8(sum)
+    return sum
 end
 
 LUT8  = Uint8[countBits_naive(a) for a in 0x00:0xFF]
 LUT16 = Uint8[countBits_naive(a) for a in 0x0000:0xFFFF]
+@assert LUT8 == LUT16[1:256]
 
 function countBits(a::Uint8)
-    return LUT8[a+1]
+    @inbounds return int(LUT8[a+1])
 end
 
 function countBits(a::Uint16)
-    return LUT16[a+1]
+    @inbounds return int(LUT16[a+1])
 end
 
 function countBits{T<:Unsigned}(a::T)
-    sum::Uint = 0
+    sum = 0
     while(bool(a))
-        sum += LUT16[uint16(a) + 1]
+        @inbounds sum += LUT16[uint16(a) + 1]
         a >>>= 16
     end
-    return uint8(sum)
+    return sum
 end
 
 function countBits!(ret, a)
-    for (i,v) in enumerate(a)
-        ret[i] = countBits(v)
-    end
+  assert(size(ret) == size(a))
+  for (i,v) in enumerate(a)
+    @inbounds ret[i] = countBits(v)
+  end
 end
 
-function countBits!{T<:Unsigned}(ret::Vector{Uint8}, a::Vector{T})
-  for i=1:length(a)
-    ret[i] = countBits(a[i])
+function countBits!{S, T<:Unsigned}(ret::Vector{S}, a::Vector{T})
+  assert(size(ret) == size(a))
+  @simd for i=1:length(a)
+    @inbounds ret[i] = countBits(a[i])
   end
 end
 
@@ -184,12 +187,46 @@ end
 #########################################
 ## Hamming distance
 #########################################
-export distance_hamming, distance2_hamming
-function distance_hamming{T<:Unsigned}(p1::Vector{T}, p2::Vector{T})
-    diff = p1 $ p2
-    #display(diff)
-    return uint8(sum(countBits(diff)))
+export distance_hamming, distance2_hamming, distance2_hamming!
+distance_hamming{T<:Unsigned}(a::T, b::T) = uint8(countBits(a$b))
+function distance_hamming{T<:Unsigned}(p1::AbstractVector{T}, p2::AbstractVector{T})
+  if length(p1) != length(p2)
+    error("vectors must be same length")
+  end
+  d = 0
+  for i=1:length(p1)
+    @inbounds d += countBits(p1[i] $ p2[i])
+  end
+  return uint8(d)
 end
+function distance2_hamming!{T<:Unsigned}(p1::Matrix{T}, p2::Matrix{T}, dist2::Matrix{Uint8})
+  assert(size(p1,1) == size(p2,1))
+  d, m = size(p1)
+  n = size(p2,2)
+  assert(size(dist2) == (m,n))
+
+  for j=1:n
+    @inbounds p2j = p2[:,j]
+    for i=1:m
+      s = 0
+      @simd for k=1:d
+#         @inbounds s += countBits(p1[d,i] $ p2[d,j])
+        @inbounds s += LUT16[(p1[d,i] $ p2[d,j])+1]
+      end
+      @inbounds dist2[i,j] = s
+#       dist2[i,j] = distance_hamming(p1[:,i], p2[:,j])
+#       dist2[i,j] = sum(countBits(p1[:,i] $ p2j))
+    end
+  end
+end
+
+function distance2_hamming!(p1::Matrix{Uint8}, p2::Matrix{Uint8}, dist2::Matrix{Uint8})
+  p116 = reinterpret(Uint16, p1, (size(p1,1)>>1, size(p1,2)))
+  p216 = reinterpret(Uint16, p2, (size(p2,1)>>1, size(p2,2)))
+
+  distance2_hamming!(p116, p216, dist2)
+end
+
 function distance2_hamming{T<:Unsigned}(p1::Matrix{T}, p2::Matrix{T})
     d1, n1 = size(p1)
     d2, n2 = size(p2)
@@ -208,7 +245,8 @@ end
 ######################################
 ## nearest neighbors
 ######################################
-export knnSearch
+export knnSearch, knnSearch!
+
 function knnSearch(tDescs, qDescs, k, dist_fn)
     assert(size(tDescs,1) == size(qDescs,1))
     assert(k >= 1)
@@ -248,6 +286,25 @@ function knnSearch(tDescs, qDescs, k, dist_fn)
     end
 
     return ret
+end
+
+function knnSearch!{T, U<:Number}(tDescs::Matrix{T}, qDescs::Matrix{T}, k, dist_fn::Function, tIdx::Matrix{Int}, dist::Matrix{U})
+  assert(size(tDescs,1) == size(qDescs,1))
+  d = size(tDescs,1)
+  assert(k >= 1)
+  nT = size(tDescs,2)
+  nQ = size(qDescs,2)
+  assert(nT >= k)
+  assert(size(tIdx) == size(dist) == (k, nQ))
+  assert(typeof(dist_fn(tDescs[:,1], qDescs[:,1])) == eltype(dist))
+
+  for i=1:nQ
+    # initialize first match with first train descriptor
+    tIdx[i] = 1
+    q = sub(qDescs, 1:d, i)
+    dist[i] = dist_fn(tDescs[:,1], q)
+  end
+
 end
 
 end # module
